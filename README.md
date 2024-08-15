@@ -64,6 +64,8 @@ Detailed code structures can be found in these directories.
 - [rsl_rl](https://github.com/leggedrobotics/rsl_rl)
 - [skrl](https://github.com/Toni-SM/skrl)
 
+The low-level training also refers a lot to [DeepWBC](https://github.com/MarkFzp/Deep-Whole-Body-Control).
+
 ## Codebase Contributions
 
 - [Minghuan Liu](https://minghuanliu.com) made efforts on improving the training efficiency, reward engineering, filling sim2real gaps, and reach expected behaviors, while cleaning and integrating the whole codebase for simplicity.
