@@ -51,7 +51,7 @@ class B1Z1RoughCfg( LeggedRobotCfg ):
         class ranges:
             init_pos_start = [0.5, np.pi/8, 0]
             init_pos_end = [0.7, 0, 0]
-            pos_l = [0.4, 0.95]
+            pos_l = [0.4, 0.95]  # 球坐标系
             pos_p = [-1 * np.pi / 2.5, 1 * np.pi / 3]
             pos_y = [-1.2, 1.2]
             
@@ -233,43 +233,43 @@ class B1Z1RoughCfg( LeggedRobotCfg ):
             # -------Gait control rewards ---------
             tracking_contacts_shaped_force = -2.0 # Only works when `observing_gait_commands` is true
             tracking_contacts_shaped_vel = -2.0 # Only works when `observing_gait_commands` is true
-            feet_air_time = 2.0
-            feet_height = 1.0
+            feet_air_time = 2.0     # v
+            feet_height = 1.0       # v
 
             # -------Tracking rewards ----------
-            tracking_lin_vel_max = 2.0 
+            tracking_lin_vel_max = 2.0 # v
             tracking_lin_vel_x_l1 = 0.
             tracking_lin_vel_x_exp = 0
-            tracking_ang_vel = 0.5
+            tracking_ang_vel = 0.5  # v
 
             delta_torques = -1.0e-7/4.0
             work = 0
             energy_square = 0.0
-            torques = -2.5e-5 
-            stand_still = 1.0 
-            walking_dof = 1.5
+            torques = -2.5e-5   # v
+            stand_still = 1.0   # v
+            walking_dof = 1.5   # v
             dof_default_pos = 0.0
             dof_error = 0.0 
-            alive = 1.0
-            lin_vel_z = -1.5
-            roll = -2
+            alive = 1.0         # v
+            lin_vel_z = -1.5    # v
+            roll = -2           # v
 
             # common rewards
-            ang_vel_xy = -0.2 
-            dof_acc = -7.5e-7 
-            collision = -10.
-            action_rate = -0.015
-            dof_pos_limits = -10.0
-            delta_torques = -1.0e-7
-            hip_pos = -0.3
-            work = -0.003
-            feet_jerk = -0.0002
-            feet_drag = -0.08
-            feet_contact_forces = -0.001
+            ang_vel_xy = -0.2       # v
+            dof_acc = -7.5e-7       # v
+            collision = -10.        # v
+            action_rate = -0.015    # v
+            dof_pos_limits = -10.0  # v
+            delta_torques = -1.0e-7 # v
+            hip_pos = -0.3          # v
+            work = -0.003           # v
+            feet_jerk = -0.0002             # v
+            feet_drag = -0.08               # v
+            feet_contact_forces = -0.001    # v
             orientation = 0.0
             orientation_walking = 0.0
             orientation_standing = 0.0
-            base_height = -5.0
+            base_height = -5.0          # v
             torques_walking = 0.0
             torques_standing = 0.0
             energy_square = 0.0

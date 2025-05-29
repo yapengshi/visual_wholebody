@@ -86,17 +86,23 @@ class ManipLoco(LeggedRobot):
         # self.curr_ee_goal_cart[:] = sphere2cart(self.curr_ee_goal_sphere)
         # ee_goal_cart_yaw_global = quat_apply(self.base_yaw_quat, self.curr_ee_goal_cart)
         # curr_ee_goal_cart_world = self._get_ee_goal_spherical_center() + ee_goal_cart_yaw_global
-        
-        dpos = self.curr_ee_goal_cart_world - self.ee_pos
+
+        # 计算目标末端执行器位置与当前末端执行器位置的差值(移动+旋转)
+        dpos = self.curr_ee_goal_cart_world - self.ee_pos 
         drot = orientation_error(self.ee_goal_orn_quat, self.ee_orn / torch.norm(self.ee_orn, dim=-1).unsqueeze(-1))
-        dpose = torch.cat([dpos, drot], -1).unsqueeze(-1)
+        dpose = torch.cat([dpos, drot], -1).unsqueeze(-1) # [num_envs, 6, 1]
+        # 计算目标手臂关节角度
         arm_pos_targets = self._control_ik(dpose) + self.dof_pos[:, -(6 + self.cfg.env.num_gripper_joints):-self.cfg.env.num_gripper_joints]
+        # 将目标手臂关节角度添到所有目标关节角度
         all_pos_targets = torch.zeros_like(self.dof_pos)
         all_pos_targets[:, -(6 + self.cfg.env.num_gripper_joints):-self.cfg.env.num_gripper_joints] = arm_pos_targets
 
         for t in range(self.cfg.control.decimation):
+            # 计算腿部关节扭矩
             self.torques = self._compute_torques(self.actions)
+            # 输入手臂关节位置控制
             self.gym.set_dof_position_target_tensor(self.sim, gymtorch.unwrap_tensor(all_pos_targets))
+            # 输入腿部关节力控制
             self.gym.set_dof_actuation_force_tensor(self.sim, gymtorch.unwrap_tensor(self.torques))
             self.gym.simulate(self.sim)
             if self.device == 'cpu':
@@ -129,6 +135,7 @@ class ManipLoco(LeggedRobot):
         self.common_step_counter += 1
 
         # prepare quantities
+        # root_states = [x,y,z,qx,qy,qz,qw,vx,vy,vz,wx,wy,wz]
         self.base_quat[:] = self.root_states[:, 3:7]
         self.base_lin_vel[:] = quat_rotate_inverse(self.base_quat, self.root_states[:, 7:10])
         self.base_ang_vel[:] = quat_rotate_inverse(self.base_quat, self.root_states[:, 10:13])
@@ -136,7 +143,7 @@ class ManipLoco(LeggedRobot):
         self.base_yaw_euler[:] = torch.cat([torch.zeros(self.num_envs, 2, device=self.device), base_yaw.view(-1, 1)], dim=1)
         self.base_yaw_quat[:] = quat_from_euler_xyz(torch.tensor(0), torch.tensor(0), base_yaw)
         self.projected_gravity[:] = quat_rotate_inverse(self.base_quat, self.gravity_vec)
-
+        # 接触力大于2判断为接触并滤波
         contact = torch.norm(self.contact_forces[:, self.feet_indices], dim=-1) > 2.
         self.contact_filt = torch.logical_or(contact, self.last_contacts) 
         self.last_contacts = contact
@@ -704,6 +711,7 @@ class ManipLoco(LeggedRobot):
         self.action_scale = torch.tensor(self.cfg.control.action_scale, device=self.device)
 
         # get gym GPU state tensors
+        # 变量与仿真核心内存关联，post_physics_step() 调用gym.refresh_xxx()函数直接关联更新，无需手动更新下面张量的值
         actor_root_state = self.gym.acquire_actor_root_state_tensor(self.sim)
         dof_state_tensor = self.gym.acquire_dof_state_tensor(self.sim)
         net_contact_forces = self.gym.acquire_net_contact_force_tensor(self.sim)
@@ -1188,8 +1196,15 @@ class ManipLoco(LeggedRobot):
     def _control_ik(self, dpose):
         # solve damped least squares
         j_eef_T = torch.transpose(self.ee_j_eef, 1, 2)
+        # 创建一个阻尼项 lambda (λ) 对角矩阵，对角线元素为小常数 (0.05^2)。
+        # 这个阻尼项有助于在雅可比矩阵接近奇异（即机器人手臂接近奇异姿态，某些方向运动受限）时，
         lmbda = torch.eye(6, device=self.device) * (0.05 ** 2)
+        # 计算公式中的 A = J_eef * J_eef^T + λ^2 * I 部分。
         A = torch.bmm(self.ee_j_eef, j_eef_T) + lmbda[None, ...]
+        # 求解逆运动学方程： u = J_eef^T * (J_eef * J_eef^T + λ^2 * I)^-1 * dpose
+        # torch.linalg.solve(A, dpose) 求解线性方程组 A * x = dpose 得到 x = A^-1 * dpose。
+        # 然后将结果 x 与雅可比矩阵的转置 j_eef_T 进行批量矩阵乘法。
+        # 最终得到的 u 是关节空间的变化量（例如关节角度的增量），用于驱动机器人手臂运动。
         u = torch.bmm(j_eef_T, torch.linalg.solve(A, dpose))#.view(self.num_envs, 6)
         return u.squeeze(-1)
 
@@ -1238,8 +1253,10 @@ class ManipLoco(LeggedRobot):
                 self.ee_start_sphere[env_ids] = self.init_start_ee_sphere[:]
                 self.ee_goal_sphere[env_ids] = self.init_end_ee_sphere[:]
             else:
+                # 随机生成self.ee_goal_orn_delta_rpy [-0.5，0.5]
                 self._resample_ee_goal_orn_once(env_ids)
                 self.ee_start_sphere[env_ids] = self.ee_goal_sphere[env_ids].clone()
+                # 指定一个无碰撞的新eef目标球坐标 self.ee_goal_sphere
                 for i in range(10):
                     self._resample_ee_goal_sphere_once(env_ids)
                     collision_mask = self._collision_check(env_ids)
@@ -1252,13 +1269,15 @@ class ManipLoco(LeggedRobot):
     def _collision_check(self, env_ids):
         ee_target_all_sphere = torch.lerp(self.ee_start_sphere[env_ids, ..., None], self.ee_goal_sphere[env_ids, ...,  None], self.collision_check_t).squeeze(-1)
         ee_target_cart = sphere2cart(torch.permute(ee_target_all_sphere, (2, 0, 1)).reshape(-1, 3)).reshape(self.num_collision_check_samples, -1, 3)
+        # 碰撞区域为包围躯干下肢的立方体
         collision_mask = torch.any(torch.logical_and(torch.all(ee_target_cart < self.collision_upper_limits, dim=-1), torch.all(ee_target_cart > self.collision_lower_limits, dim=-1)), dim=0)
         underground_mask = torch.any(ee_target_cart[..., 2] < self.underground_limit, dim=0)
-        return collision_mask | underground_mask
+        return collision_mask | underground_mask # 有碰撞返回true
 
     def _update_curr_ee_goal(self):
         if not self.cfg.env.teleop_mode:
             t = torch.clip(self.goal_timer / self.traj_timesteps, 0, 1)
+            # 球坐标系（半径，俯仰角，偏航角）
             self.curr_ee_goal_sphere[:] = torch.lerp(self.ee_start_sphere, self.ee_goal_sphere, t[:, None])
 
         # TODO: for the teleop mode, we need to directly update self.curr_ee_goal_cart using VR controller.
@@ -1269,6 +1288,7 @@ class ManipLoco(LeggedRobot):
         # TODO: for the teleop mode, we need to directly update self.ee_goal_orn_quat using VR controller.
         default_yaw = torch.atan2(ee_goal_cart_yaw_global[:, 1], ee_goal_cart_yaw_global[:, 0])
         default_pitch = -self.curr_ee_goal_sphere[:, 1] + self.cfg.goal_ee.arm_induced_pitch
+        # roll为90+droll; pitch为世界坐标系eff_pitch+dpitch; yaw为世界坐标系eff_yaw+dyaw
         self.ee_goal_orn_quat = quat_from_euler_xyz(self.ee_goal_orn_delta_rpy[:, 0] + np.pi / 2, default_pitch + self.ee_goal_orn_delta_rpy[:, 1], self.ee_goal_orn_delta_rpy[:, 2] + default_yaw)
         
         self.goal_timer += 1
@@ -1281,6 +1301,7 @@ class ManipLoco(LeggedRobot):
 
         self._resample_ee_goal(resample_id)
     
+    # 获取手臂基坐标在世界坐标系下的位置（四足base(x,y,0)+yaw旋转后的offset(0.3,0,0.7)）
     def _get_ee_goal_spherical_center(self):
         center = torch.cat([self.root_states[:, :2], torch.zeros(self.num_envs, 1, device=self.device)], dim=1)
         center = center + quat_apply(self.base_yaw_quat, self.ee_goal_center_offset)
